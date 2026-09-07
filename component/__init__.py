@@ -74,6 +74,7 @@ class Guide:
         rig를 build할 때 이 위치를 참조합니다. pole vector 노드는 컴포넌트 가이드 하위에 들어갑니다.
         distance값은 guide 컴포넌트의 pv_distance 속성과 연결되어 관리됩니다.
         """
+        # TODO: popolo로 옮겨서 컴포넌트화 할 때는 pole vector 생성하는 기능을 core로 옮겨 사용합니다.
         if not len(points) == 3:
             raise ValueError("Make sure to put the value into the three points.")
         if not cmds.objExists(guide + ".pv_distance"):
@@ -88,9 +89,9 @@ class Guide:
         cmds.connectAttr(point2 + ".worldMatrix", dmp2 + ".inputMatrix")
         cmds.connectAttr(point3 + ".worldMatrix", dmp3 + ".inputMatrix")
 
-        pma1 = cmds.createNode("plusMinusAverage") # point1 - point2
-        pma2 = cmds.createNode("plusMinusAverage") # point1 - point3
-        cmds.setAttr(pma1 + ".operation", 2) # subtract
+        pma1 = cmds.createNode("plusMinusAverage")  # point1 - point2
+        pma2 = cmds.createNode("plusMinusAverage")  # point1 - point3
+        cmds.setAttr(pma1 + ".operation", 2)  # subtract
         cmds.connectAttr(dmp2 + ".outputTranslate", pma1 + ".input3D[0]")
         cmds.connectAttr(dmp1 + ".outputTranslate", pma1 + ".input3D[1]")
         cmds.setAttr(pma2 + ".operation", 2)
@@ -99,7 +100,7 @@ class Guide:
 
         normalize = cmds.createNode("vectorProduct")
         cmds.setAttr(normalize + ".normalizeOutput", True)
-        cmds.setAttr(normalize + ".operation", 0) # no operation
+        cmds.setAttr(normalize + ".operation", 0)  # no operation
         cmds.connectAttr(pma2 + ".output3D", normalize + ".input1")
 
         dot_ = cmds.createNode("vectorProduct")
@@ -133,7 +134,9 @@ class Guide:
         cmds.connectAttr(cmp + ".outputMatrix", mult + ".matrixIn[0]")
         cmds.connectAttr(guide + ".worldInverseMatrix", mult + ".matrixIn[1]")
 
-        if not cmds.listRelatives(pv, parent=True) or not guide in cmds.listRelatives(pv, parent=True):
+        if not cmds.listRelatives(pv, parent=True) or not guide in cmds.listRelatives(
+            pv, parent=True
+        ):
             cmds.parent(pv, guide)
         cmds.connectAttr(mult + ".matrixSum", pv + ".offsetParentMatrix")
 
@@ -165,6 +168,92 @@ class Rig:
         name = f"{name}_{side}{index}_{description}_{extension}"
         name = "_".join([x for x in name.split("_") if x])
         return name
+
+    def attribute(self, node, attributes, values):
+        """
+        for 구문을 돌려 attributes와 value에 있는 longName: {flag: value} 형식의 딕셔너리 데이터를
+        순차적으로 core.add_attr(node, longName, attributes[attr])로 실행합니다.
+        """
+        for attr in attributes.keys():
+            core.add_attr(node, longName=attr, **attributes[attr])
+        core.set_value(node, values)
+
+
+def get_guide_hierarchy(guide):
+    guide_hierarchy = {}
+    logical_table = {}
+
+    def _traverse(current_node, logical_parent, current_table):
+        is_guide = cmds.attributeQuery("is_guide", node=current_node, exists=True)
+
+        # 여기서 미리 다음 함수 실행할 때의 parent를 현재의 parent로 지정하고,
+        # 만약 is guide 조건을 충족할시에만 parent를 current node로 업데이트합니다.
+        next_logical_parent = logical_parent
+        next_table = current_table
+
+        if is_guide:
+            # 인자로 받은 딕셔너리 데이터에 현재 노드를 key로 생성합니다.
+            current_table[current_node] = {}
+            # 현재 노드의 하위에 있는 데이터를 받아야 하기 때문에 다음에 실행될 table은 현재 노드의 value로 들어가야 합니다.
+            next_table = current_table[current_node]
+            # 현재 함수가 끝나고 실행될 때는 현재 노드 하위에 있는 노드를 검색해야 하기에 다음 함수의 parent는 현재 노드가 됩니다.
+            next_logical_parent = current_node
+
+        children = (
+            cmds.listRelatives(current_node, children=True, type="transform") or []
+        )
+        for child in children:
+            _traverse(child, next_logical_parent, next_table)
+
+    _traverse(guide, None, guide_hierarchy)
+    return guide_hierarchy
+
+
+def get_guide_attributes(guide):
+    attributes = {}
+    values = {}
+
+    attr_list = cmds.listAttr(guide, userDefined=True) or []
+    for attr in attr_list:
+        is_attribute_type = cmds.addAttr(
+            f"{guide}.{attr}", query=True, attributeType=True
+        )
+        if is_attribute_type == "typed":
+            _type = cmds.addAttr(f"{guide}.{attr}", query=True, dataType=True)[0]
+        else:
+            _type = is_attribute_type
+        _multi = cmds.attributeQuery(attr, node=guide, multi=True)
+        _min = (
+            cmds.addAttr(f"{guide}.{attr}", query=True, minValue=True)
+            if _type == is_attribute_type
+            else None
+        )
+        _max = (
+            cmds.addAttr(f"{guide}.{attr}", query=True, maxValue=True)
+            if _type == is_attribute_type
+            else None
+        )
+        _default = (
+            cmds.addAttr(f"{guide}.{attr}", query=True, defaultValue=True)
+            if _type == is_attribute_type
+            else None
+        )
+        attributes[attr] = {}
+        for v_, flag in zip(
+            [_type, _min, _max, _default, _multi],
+            ["type", "minValue", "maxValue", "defaultValue", "multi"],
+        ):
+            if v_:
+                attributes[attr].update({flag: v_})
+        if _multi:
+            index_ = cmds.getAttr(f"{guide}.{attr}", multiIndices=True) or []
+            for i in index_:
+                _value = cmds.getAttr(f"{guide}.{attr}[{i}]")
+                values.update({f"{attr}[{i}]": _value})
+        else:
+            _value = cmds.getAttr(f"{guide}.{attr}")
+            values.update({attr: _value})
+    return attributes, values
 
 
 load_components()

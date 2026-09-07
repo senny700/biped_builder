@@ -3,7 +3,7 @@ from maya import cmds
 
 # biped_builder
 from .. import component, core
-from ..core import controller, matrix
+from ..core import controller, matrix, joint
 
 # built-ins
 import copy
@@ -26,13 +26,14 @@ class Guide(component.Guide):
             {
                 "is_guide": {"type": "bool"},
                 "origin_ctl_size": {"type": "float", "minValue": 0},
-                "origin_ctl_count": {"type": "long", "minValue": 0, "defaultValue": 2},
+                "sub_ctl_count": {"type": "long", "minValue": 0, "defaultValue": 2},
             }
         )
+        assembly_attributes.pop("side")
         assembly_values.update(
-            {"component": "assembly", "name": "noname", "origin_ctl_size": 5}
+            {"component": "assembly", "name": "biped", "origin_ctl_size": 5}
         )
-        assembly = self.create_guide(name="noname")
+        assembly = self.create_guide(name="biped")
         self.attirbute(assembly, assembly_attributes, assembly_values)
         controller.box_controller(name=None, size=3, parent=assembly)
         for attr in ["t", "r", "s"]:
@@ -51,17 +52,21 @@ class Guide(component.Guide):
             control_attributes = copy.deepcopy(component.attributes)
             control_values = copy.deepcopy(component.values)
 
-            control = self.create_guide(name=name, side=side, index=index, parent=parent if parent else None)
+            control = self.create_guide(
+                name=name, side=side, index=index, parent=parent if parent else None
+            )
 
             control_attributes.update({"is_guide": {"type": "bool"}})
             control_values.update(
-                {"component": "control", "name": "body_C0_guide", "side": "C", "index": 0}
+                {"component": "control", "name": name, "side": side, "index": index}
             )
             controller.box_controller(size=1, parent=control)
             self.attirbute(control, control_attributes, control_values)
             return control
+
         body = control_guide("body", "C", 0, assembly)
         cmds.xform(body, worldSpace=True, translation=(0, 8, 0))
+
         # spine
         def spine_guide(name, side, index, parent=None):
             spine_attributes = copy.deepcopy(component.attributes)
@@ -81,7 +86,7 @@ class Guide(component.Guide):
             spine_values.update(
                 {
                     "component": "spine",
-                    "name": spine,
+                    "name": name,
                     "side": side,
                     "index": index,
                     "max_stretch": 1.2,
@@ -96,8 +101,8 @@ class Guide(component.Guide):
                 name=name,
                 side=side,
                 index=index,
-                description="pos1",
-                extension=core.guide_extension,
+                description="1",
+                extension="pos",
             )
             spine_1 = cmds.createNode("transform", name=spine_1, parent=spine)
             controller.cross_controller(parent=spine_1)
@@ -106,8 +111,8 @@ class Guide(component.Guide):
                 name=name,
                 side=side,
                 index=0,
-                description="pos2",
-                extension=core.guide_extension,
+                description="2",
+                extension="pos",
             )
             spine_2 = cmds.createNode("transform", name=spine_2, parent=spine_1)
             controller.cross_controller(parent=spine_2)
@@ -116,8 +121,8 @@ class Guide(component.Guide):
                 name=name,
                 side=side,
                 index=0,
-                description="end",
-                extension=core.guide_extension,
+                description="",
+                extension="end",
             )
             spine_end = cmds.createNode("transform", name=spine_end, parent=spine_2)
             controller.cross_controller(parent=spine_end)
@@ -158,7 +163,7 @@ class Guide(component.Guide):
             arm_values.update(
                 {
                     "component": "arm",
-                    "name": arm,
+                    "name": name,
                     "side": side,
                     "index": index,
                     "fk_ik": 0,
@@ -173,19 +178,19 @@ class Guide(component.Guide):
             cmds.xform(arm, worldSpace=True, rotation=(0, 0, 0))
             cmds.setAttr(arm + ".t", 2, 0, 0)
             humerus = core.create_name(
-                name="humerus", side=side, index=index, extension=core.guide_extension
+                name=name, side=side, index=index, description="1", extension="pos"
             )
             humerus = cmds.createNode("transform", name=humerus, parent=arm)
             controller.cross_controller(parent=humerus)
             cmds.setAttr(humerus + ".t", 2, 0, 0)
             elbow = core.create_name(
-                name="elbow", side=side, index=index, extension=core.guide_extension
+                name=name, side=side, index=index, description="2", extension="pops"
             )
             elbow = cmds.createNode("transform", name=elbow, parent=humerus)
             controller.cross_controller(parent=elbow)
             cmds.setAttr(elbow + ".t", 2, 0, -1)
             wrist = core.create_name(
-                name="wrist", side=side, index=index, extension=core.guide_extension
+                name=name, side=side, index=index, description="3", extension="pos"
             )
             wrist = cmds.createNode("transform", name=wrist, parent=elbow)
             controller.cross_controller(parent=wrist)
@@ -194,11 +199,11 @@ class Guide(component.Guide):
                 positions=[arm, humerus, elbow, wrist], parent=guide_line_grp
             )
             elbow_pv = core.create_name(
-                name="elbow",
+                name=name,
                 side=side,
                 index=index,
                 description="pv",
-                extension=core.guide_extension,
+                extension="pos",
             )
             elbow_pv = cmds.createNode("transform", name=elbow_pv)
             controller.cross_controller(parent=elbow_pv)
@@ -228,6 +233,7 @@ class Guide(component.Guide):
             self.attirbute(hand, hand_attributes, hand_values)
             cmds.connectAttr(hand + ".worldMatrix", hand + ".matrices[0]")
             return hand
+
         hand = hand_guide("hand", "L", 0, arm_list[-1])
 
         # leg - left
@@ -253,7 +259,7 @@ class Guide(component.Guide):
             leg_values.update(
                 {
                     "component": "leg",
-                    "name": leg,
+                    "name": name,
                     "side": side,
                     "index": index,
                     "fk_ik": 1,
@@ -324,6 +330,7 @@ class Guide(component.Guide):
             self.attirbute(foot, foot_attributes, foot_values)
             cmds.connectAttr(foot + ".worldMatrix", foot + ".matrices[0]")
             return foot
+
         foot = foot_guide("foot", "L", 0, leg_list[-1])
 
         # right arm
@@ -339,18 +346,146 @@ class Guide(component.Guide):
         foot_r = foot_guide("foot", "R", 0, parent=leg_r_list[-1])
         self.set_mirror(foot, foot_r)
 
+        # TODO: neck, head, eyes, finger는 추후에 구성함.
+        # neck
+        neck_attributes = copy.deepcopy(component.attributes)
+        neck_values = copy.deepcopy(component.values)
+
+        # head
+        head_attributes = copy.deepcopy(component.attributes)
+        head_values = copy.deepcopy(component.values)
+
 
 class Rig(component.Rig):
 
-    def __init__(self):
+    def __init__(self, guide):
         super().__init__()
+        # NOTE: 현재는 Rig class안에서 hierarchy를 한꺼번에 받지만,
+        # 추후에 component화 할 때는 hierarchy를 우선으로 구한 뒤, component별로 build합니다.
+        # 현재는 hierarchy 데이터가 의미가 없지만, 추후에 컴포넌트를 나눌시 이 데이터를 기반으로 구조를 생성합니다.
+        self.hierarchy = component.get_guide_hierarchy(guide)
 
     def objects(self):
-        # TODO: guide에 맞춰서 노드 생성하는 코드부터 시작합니다.
 
-        # guide 노드가 가지고 있는 데이터 값을 긁어내 노드 생성.
+        assembly_guide = "biped_guide"
+        asset_name = "_".join(assembly_guide.split("_")[:-1])
+        # asset grp
+        self.asset_grp = cmds.createNode(
+            "transform", name="{0}_{1}".format(asset_name, core.group_extension)
+        )
+        self.cache_grp = cmds.createNode(
+            "transform",
+            name="{0}_cache_{1}".format(asset_name, core.group_extension),
+            parent=self.asset_grp,
+        )
+        self.rig_grp = cmds.createNode(
+            "transform",
+            name="{0}_rig_{1}".format(asset_name, core.group_extension),
+            parent=self.asset_grp,
+        )
+        self.skeleton = cmds.createNode(
+            "transform", name="skeleton", parent=self.rig_grp
+        )
+        self.roots = cmds.createNode("transform", name="roots", parent=self.rig_grp)
+        self.xxx = cmds.createNode("transform", name="xxx", parent=self.rig_grp)
 
-        pass
+        # assembly
+        # assembly component인 guide이름을 인자로 넣으면 assembly setting하기.
+        def assembly(guide, asset_name):
+            root = cmds.createNode(
+                "transform",
+                name=asset_name + "_" + core.root_extension,
+                parent=self.roots,
+            )
+            assembly_attributes, assembly_values = component.get_guide_attributes(guide)
+            self.attribute(root, assembly_attributes, assembly_values)
+            sub_ctl_count = assembly_values["sub_ctl_count"] or None
+            origin_ctl_size = assembly_values["origin_ctl_size"]
+
+            # controller
+            origin_ctl = cmds.circle(
+                radius=origin_ctl_size,
+                normal=(0, 1, 0),
+                name=self.generate_name(
+                    name="origin", extension=core.controller_extension
+                ),
+                constructionHistory=False,
+            )[0]
+            origin_npo = cmds.createNode(
+                "transform",
+                name=self.generate_name(name="origin", extension=core.npo_extension),
+                parent=root,
+            )
+            origin_ctl = cmds.parent(origin_ctl, origin_npo)[0]
+            # TODO: sub ctl count 값을 받아서 그 숫자만큼 sub ctl를 생성해야 합니다.
+            origin_ref = cmds.createNode(
+                "transform",
+                name=self.generate_name(name="origin", extension=core.ref_extension),
+                parent=origin_ctl,
+            )
+
+            # joint
+            origin_jnt = cmds.createNode(
+                "joint",
+                name=self.generate_name(name="origin", extension=core.joint_extension),
+            )
+            return root, origin_npo, origin_ctl, origin_ref, origin_jnt
+
+        (
+            self.origin_root,
+            self.origin_npo,
+            self.origin_ctl,
+            self.origin_ref,
+            self.origin_jnt,
+        ) = assembly(assembly_guide, asset_name)
+
+        # spine
+        # NOTE: 링크드인에 있는 spine 게시물 보고 따라해보기 -> 그냥 nurbs에 spline 올려서 하자..
+        spine_guide = "spine_C0_guide"
+
+        def spine(guide):
+            spine_attributes, spine_values = component.get_guide_attributes(guide)
+            name = spine_values["name"]
+            side = spine_values["side"]
+            index = spine_values["index"]
+            root = cmds.createNode(
+                "transform",
+                name=self.generate_name(
+                    name, side, index, "", component.root_extension
+                ),
+            )
+
+            self.attribute(root, spine_attributes, spine_values)
+            matrices = [
+                cmds.getAttr(f"{root}.{x}")
+                for x in cmds.listAttr(root + ".matrices", multi=True)
+            ]
+            cmds.xform(root, worldSpace=True, matrix=matrices[0])
+
+            # skeleton hierarchy 만들기
+            skeletons = [
+                self.generate_name(name, side, index, x, core.joint_extension)
+                for x in ["0", "1", "2", "end"]
+            ]
+            core.joint.joint_chain(skeletons, matrices)
+
+            # TODO: spine의 matrices를 어떤 방식으로 받을지 생각해보자.
+            # spline ik joint hierarchy 만들기
+
+            # 하위 fk hierarchy 만들기
+
+            # controller 만들기.
+
+            # nurbs surface 만들기.
+
+        spine(spine_guide)
+
+        # arm - left
+        left_arm = cmds.createNode("transform", name="arm_L0_root")
+        left_arm_attributes, left_arm_values = component.get_guide_attributes(
+            "arm_L0_guide"
+        )
+        self.attribute(left_arm, left_arm_attributes, left_arm_values)
 
     def attributes(self):
         pass
